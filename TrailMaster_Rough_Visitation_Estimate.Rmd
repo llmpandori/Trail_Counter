@@ -1,0 +1,85 @@
+---
+title: "Cabrillo National Monument Coastl Visitation Estimate"
+author: "Lauren Pandori"
+date: 'February 2021'
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Explanation
+
+Data were collected by 2 TrailMaster IR trail cameras positioned at the entry to the coastal trail at lots 1 and 2. Cameras were serviced approximately weekly, resulting in ~ 600 total files with 3.8 million 'events'. Data were QC'ed using two methods (1) viewing a plot of visitation 'events' across hours at the park, rejecting any file with many observations outside of park hours, and (2) automated qc, where visitation events 30 minutes prior to sunrise or after sunset were discarded, along with any dates with incomplete data. 
+
+```{r, include = FALSE}
+# setup and package load
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(dplyr)
+library(formattable)
+
+# set wd (same b/wc computers)
+setwd('D:/LP_Files/TrailMaster_Data/TrailMaster')
+
+# load roughly qc'ed data
+tmdata <- read_csv("D:/LP_Files/TrailMaster_Data/TrailMaster/tmdata_roughqc_feb21.csv", 
+    col_types = cols(hourlydrybulbtemperature = col_number(), 
+        hourlywindspeed = col_number(), hourlyprecipitation = col_number()))
+```
+
+## Visitation Summary
+In the tables below, the columns are as follows: 
+
+
+Lot = 1 (by the tidepool area) or 2 (~ 0.4 miles away from tidepool area along coastal trail)
+
+Year = calendar year of data collection
+
+Coverage = percent of days viable data were collected (assuming 365 days/yr)
+
+Count = adjusted count of visitation
+"TrailMaster counts must be multiplied by a factor of 1.53 at Lot 1 and 1.26 at Lot 2.  
+Since the counters cannot distinguish direction and everyone must pass them twice, the counts must also be multiplied by 0.5 to obtain a total at each tracker." - B. Phillips 2012
+
+```{r, echo=FALSE}
+
+tmdata2$lot <- as_factor(tmdata2$lot)
+tmdata2$year <- as_factor(tmdata2$year)
+tmdata2$year <- fct_relevel(tmdata2$year)
+
+summarytable <- tmdata2 %>%
+  filter(year %in% c(2011:2019)) %>%
+  group_by(lot, year) %>%
+  tally()
+
+ # get # of days (and % coverage) per year
+summary2 <- tmdata2 %>%
+  filter(year %in% c(2011:2019)) %>%
+  group_by(lot, year) %>%
+  summarise(n_days = length(unique(date(datetime2)))) %>%
+  mutate(pct_days = round((n_days/365*100), digits = 2))
+
+summary3 <- left_join(summarytable, summary2)
+
+summary3 <- summary3 %>%
+  mutate(
+    adj_count = round(n*(((100 - pct_days)+100)/100), digits = 0),
+    corrected_count = round(if_else(lot == 1, (adj_count/2)*1.53, (adj_count/2)*1.26), digits = 0)) %>%
+  select(lot, year, pct_days, corrected_count) 
+
+
+summary3 <- summary3 %>%
+  rename(Lot = lot, Year = year, Coverage = pct_days, Count = corrected_count)
+
+formattable(summary3)
+
+write.csv(summary3, 'summary3.csv')
+  
+``` 
+
