@@ -3,7 +3,7 @@
 ### Purpose: Assemble raw files and preliminary analyses
 ### Author: L. Pandori
 ### Date Created: 11/17/2020
-### Last Edited: 2/19/2020
+### Last Edited: 3/17/2020
 ###############################################################################
 
 ##### set-up #####
@@ -19,7 +19,7 @@ library(dplyr)
 
 
 ##### read in meta data #####
-tmeta <- read_excel("TrailMaster_MetaData.xlsx", 
+tmeta <- read_excel("Accessory_Data/TrailMaster_MetaData.xlsx", 
                     col_types = c("numeric", "date", "date", 
                                   "numeric", "numeric", "numeric", 
                                   "text", "text", "text", "numeric", 
@@ -36,7 +36,7 @@ tmeta <- read_excel("TrailMaster_MetaData.xlsx",
 ##### read in individual files #####
   
   # Set working directory (mega folder of raw data)
-  setwd('D:/LP_Files/TrailMaster_Data/TrailMaster/Corrected_Raw_Data')
+  setwd("D:/LP_Files/TrailMaster_Data/Trail_Counter/Corrected_Raw_Data")
 
   # use list apply to read in and rbind (stack) files
   tmdata <- do.call(
@@ -45,7 +45,10 @@ tmeta <- read_excel("TrailMaster_MetaData.xlsx",
           # read csv files in working directory
           lapply(list.files(), read_csv))
   # 3786248 rows
-
+  
+  # change wd back so nothing new gets saved into raw data folder
+  setwd("D:/LP_Files/TrailMaster_Data/Trail_Counter")
+  
 ##### tidy trailmaster (tm) data #####
   tmdata <- tmdata %>% 
     # rename columns as lower case
@@ -64,17 +67,16 @@ tmeta <- read_excel("TrailMaster_MetaData.xlsx",
             time = hms(time)) %>%
     # remove rows where date is NA (parsing failures)
     filter(!is.na(date))
-    # nrow(tmdata) should = 3781894 if all parsing failures removed
+    # nrow(tmdata) should = 3781894 if parsing failures (4354) removed
 
 ##### correct for dst #####
 # in visual qc, 2011-2013 already corrected for dst, 2014 onward not adusted
   
 # load list of dst transitions (March - November, 2010-2029)
-  dst <- read_csv("D:/LP_Files/TrailMaster_Data/TrailMaster/TrailMaster_DST_Start_End_2010_2029.csv", 
+  dst <- read_csv("Accessory_Data/TrailMaster_DST_Start_End_2010_2029.csv", 
           # parse start and end dates as datetimes
           col_types = cols(dst_start = col_datetime(format = "%m/%d/%Y %H:%M"), 
                            dst_end = col_datetime(format = "%m/%d/%Y %H:%M")))
-  # 
 
   # add year column to tmdata for joining
   tmdata <- mutate(tmdata, year = year(date))
@@ -104,7 +106,7 @@ remove(dst)
 ##### sync with tides #####
 
   # load tide data (pulled from TboneTides XTide for July 2010 - July 2025, 10 min intervals)
-  tides <- read_csv("D:/LP_Files/TrailMaster_Data/TrailMaster/TrailMaster_XTide_2010_2025_Needs_Overlap_Correction.csv", 
+  tides <- read_csv("Accessory_Data/TrailMaster_XTide_2010_2025_Needs_Overlap_Correction.csv", 
            # format datetime column for consistency with tmdata
            col_types = cols(datetime_round = col_datetime(format = "%m/%d/%Y %H:%M")))
 
@@ -119,12 +121,10 @@ remove(dst)
   
 remove(tides)
 
-#### sync with sunset and sunrise times ####
+##### sync with sunset and sunrise times ####
 
   # load data
-  events <- read_excel("D:/LP_Files/TrailMaster_Data/TrailMaster/TrailMaster_Sunrise_Sunset_Tides_Time_2010_2026.xlsx", 
-                       col_types = c("date", "text", "text", 
-                                     "text"))
+  events <- read_excel("Accessory_Data/TrailMaster_Sunrise_Sunset_Tides_Time_2010_2026.xlsx", col_types = c("date", "text", "text", "text"))
 
   # there is some overlap in data pulled, make sure 1 sunrise and 1 sunset per date
   events <- unique(events)
@@ -148,15 +148,15 @@ remove(tides)
   # remove sunrise/sunset data from environment
   remove(events)
   
-#### sync with weather data #####
+##### sync with weather data #####
   
   # load data
-  weather <- read_csv("D:/LP_Files/TrailMaster_Data/TrailMaster/SD_Airport_Weather_2011_2020.csv")
+  weather <- read_csv("Accessory_Data/SD_Airport_Weather_2011_2020.csv")
   
   # note with units - 
     # temp - *F
     # wind - speed in mph
-    # precip - precipitation in " (i think...pretty sure)
+    # precip - precipitation in inches
   
   # tidy weather data
   weather <- weather %>%
@@ -170,7 +170,10 @@ remove(tides)
   # align w tmdata
   tmdata <- left_join(tmdata, weather, by = 'nearesthr')
   
-#### tidy again before vis and metadata qc ####
+  # remove weather data
+  remove(weather)
+  
+##### tidy again before vis and metadata qc ####
   tmdata <- tmdata %>%
     select(event, datetime2, lot, start, end, year, tidelvl, sunrise, sunset, nearesthr, hourlydrybulbtemperature, hourlywindspeed, hourlyprecipitation)
   
@@ -178,7 +181,7 @@ remove(tides)
   
   # write_csv(tmdata2, 'tmdata_roughqc_feb21.csv')
   
-# ##### visual qc - inspect each file for abnormal obs #####
+##### visual qc - inspect each file for abnormal obs #####
 # # warning: large, multi-panel plots ahead
 # # target dates to where needed (need nov - dec 2020)
 # 
@@ -246,7 +249,7 @@ remove(tides)
 # # export
 #    
 #   write_csv(tmdata2, 'tmdata_roughqc_feb21.csv')
-#### qc steps overview ####
+# qc steps overview #
   
 # in metadata...
   # 1 - generate auto-qc checks for each file in meta data
@@ -263,35 +266,41 @@ remove(tides)
   # 1 - filter by dates rejected in metadata qc
   # 2 - filter by -1 hr before sunrise and +1 hr after sunset
 
-#### metadata qc ####
+##### metadata qc - generate list of dates where good data NA ####
   
   # get date ranges where no data collected (or partial data collected)
   nodata <- tmeta %>%
-    # get date ranges w no data
-    filter(csv_file == 'NO') %>%
+    # get date ranges where there's no CSV, or the file was rejected in QC
+    filter(csv_file == 'NO' | reject == 'YES' | hand_qc_fig == 'REJECT') %>%
     # get 3 relevant columns
-    select(start, end, lot) 
+    select(start, end, lot) %>%
+    filter(start < end)
   
-  # start list of dates with known date in proper format (so others add nicely)
-  nodata_datelist <- NA
-  nodata_datelist$datelist <- nodata$start[1] 
-    
-  # calculate all dates w/in range w/ no data
-  for (i in 1:2) {
+  # get all dates w/in ranges w/ no data or didnt' pass qc (list of dates and lots)
   
-    # subset relevant lot
-    nodata_play <- filter(nodata, lot == i) 
+  # output list
+  nodata_datelist <- tibble(value = NA, lot = NA)
+  
+  for(i in 1:nrow(nodata)) {
     
-    for(j in 1:nrow(nodata_play)) {
+    datelist <- as_tibble(seq(date(nodata$start[i]), date(nodata$end[i]), by = 'days')) %>%
+      mutate(lot = nodata$lot[i])
     
-    # generate list of dates for each row and add to list
-      nodata_datelist$datelist <- rbind(nodata_datelist, seq(nodata_play$start[j], nodata_play$end[j], by = 'days'))
-      
-      nodata_datelist$lot <- 1
-    }
+    nodata_datelist <- bind_rows(nodata_datelist, datelist)
   }
-    
-  
-  
 
+  # get rid of duplicates in output
+  nodata_datelist <- distinct(nodata_datelist)
 
+##### create and export rough qc'ed data #####
+nodata_datelist <- mutate(nodata_datelist, key = paste(lot, value, sep = ','))
+key <- nodata_datelist$key
+  
+tmdata3 <- tmdata2 %>%
+    # filter out dates in the no data/ failed QC check date list
+    mutate(filter_key = paste(lot,date(datetime2), sep = ',')) %>%
+    filter(! filter_key %in% key) %>%
+    select(-c(filter_key))
+
+# data.table package fwrite() is faster than write_csv 
+data.table::fwrite(tmdata3, 'QC_Data/TM_Data_QC_Mar21.csv')
